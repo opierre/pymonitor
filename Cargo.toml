@@ -1,0 +1,13 @@
+[package]
+name = "pymonitor"
+version = "0.0.1.dev0"
+edition = "2024"
+
+[lib]
+name = "rust_monitor"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.28.2", features = ["extension-module"] }
+sysinfo = "0.38.2"
+ureq = "3.2.0"
