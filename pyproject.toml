@@ -1,0 +1,42 @@
+[project]
+name = "pymonitor"
+version = "0.0.1"
+description = "A lightweight computer constants monitor using Rust and Python"
+readme = "README.md"
+authors = [
+    { name = "Pierre OLIVIER", email = "pierreolivier.pro@gmail.com" }
+]
+license = { text = "Apache-2.0" }
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: System :: Hardware",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Operating System",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.24.1",
+    "rich>=14.3.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.2",
+    "ty>=0.0.18",
+]
+test = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "pytest-mock>=3.15.1",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "S", "D", "I", "RUF"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+
