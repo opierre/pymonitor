@@ -60,3 +60,7 @@ convention = "google"
     "S101",
     "D100",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--cov=pymonitor --cov-report=term-missing"
+testpaths = ["tests"]
