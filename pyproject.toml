@@ -1,3 +1,7 @@
+[build-system]
+requires = ["maturin>=1.12.6, <2.0"]
+build-backend = "maturin"
+
 [project]
 name = "pymonitor"
 version = "0.0.1"
@@ -39,4 +43,10 @@ select = ["E", "F", "S", "D", "I", "RUF"]
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff]
+line-length = 120
 
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "pymonitor._rust_monitor"
