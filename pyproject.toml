@@ -27,6 +27,14 @@ dependencies = [
     "pygments>=2.20.0"
 ]
 
+[project.scripts]
+pymonitor = "pymonitor.cli:app"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "pymonitor._rust_monitor"
+
 [dependency-groups]
 dev = [
     "ruff>=0.15.2",
@@ -52,8 +60,3 @@ convention = "google"
     "S101",
     "D100",
 ]
-
-[tool.maturin]
-features = ["pyo3/extension-module"]
-python-source = "python"
-module-name = "pymonitor._rust_monitor"
