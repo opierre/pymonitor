@@ -39,14 +39,23 @@ class PyMonitor:
             pass
 
     @staticmethod
-    def get_process_mess_metrics(name: str) -> list[tuple[int, float, float]]:
+    def get_process_metrics(name: str) -> list[tuple[int, float, float]]:
         """Retrieves resource usage for specific processes by name.
 
         Args:
             name: The exact name of the process.
 
         Returns:
-            list[tuple[int, float, float]]: A list of tuples containing (pid, cpu_percent, ram_percent).
+            A list of tuples containing (pid, cpu_percent, ram_percent).
         """
         return _rust_monitor.get_process_metrics(name)
 
+    @staticmethod
+    def get_global_metrics() -> tuple[float, str, float, int, float, int, int]:
+        """Retrieves an immediate snapshot of the system's global resource usage.
+
+        Returns:
+            A tuple of (cpu_usage_percentage, cpu_brand, ram_percent, max_ram, disk_percent, available_disk,
+            boot_time).
+        """
+        return _rust_monitor.get_global_metrics()

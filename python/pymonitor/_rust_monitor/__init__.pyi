@@ -5,6 +5,7 @@ import builtins
 import typing
 __all__ = [
     "MonitorHandle",
+    "get_global_metrics",
     "get_process_metrics",
 ]
 
@@ -14,6 +15,11 @@ class MonitorHandle:
     Holds the shared state to allow Python to stop the Rust background thread.
     """
     ...
+
+def get_global_metrics() -> tuple[builtins.float, builtins.str, builtins.float, builtins.int, builtins.float, builtins.int, builtins.int]:
+    r"""
+    Grab a single snapshot of the current global CPU, RAM usage percentage, available disk space in bytes, and boot time.
+    """
 
 def get_process_metrics(name: builtins.str) -> builtins.list[tuple[builtins.int, builtins.float, builtins.float]]:
     r"""

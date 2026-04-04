@@ -13,7 +13,7 @@ def mock_monitor(mocker):
 
 def test_process_command(mock_monitor):
     """Test the process CLI command with an existing process name."""
-    mock_monitor.get_process_mess_metrics.return_value = [(1234, 5.2, 15.6)]
+    mock_monitor.get_process_metrics.return_value = [(1234, 5.2, 15.6)]
     result = runner.invoke(app, ["--name", "testproc"])
     assert result.exit_code == 0
     assert "Process Metrics: testproc" in result.stdout

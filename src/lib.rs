@@ -44,11 +44,55 @@ fn get_process_metrics(name: &str) -> PyResult<Vec<(u32, f32, f32)>> {
     Ok(results)
 }
 
+/// Grab a single snapshot of the current global CPU, RAM usage percentage, available disk space in bytes, and boot time.
+#[gen_stub_pyfunction]
+#[pyfunction]
+fn get_global_metrics() -> PyResult<(f32, String, f32, u64, f32, u64, u64)> {
+    let mut sys = System::new_with_specifics(
+        sysinfo::RefreshKind::nothing()
+        .with_cpu(sysinfo::CpuRefreshKind::nothing().with_cpu_usage())
+        .with_memory(sysinfo::MemoryRefreshKind::nothing().with_ram())
+    );
+    sys.refresh_cpu_usage();
+
+    // Sleep is mandatory to establish a time delta for process CPU % calculations.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    sys.refresh_cpu_usage();
+
+    let ram_percent = (sys.used_memory() as f32 / sys.total_memory() as f32) * 100.0;
+    let cpu_brand = sys.cpus().first().map(|cpu| cpu.brand().to_string()).unwrap_or_else(|| "Unknown".to_string());
+
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let mut available_disk_bytes = 0;
+    let mut total_disk_bytes = 0;
+    for disk in disks.list() {
+        available_disk_bytes += disk.available_space();
+        total_disk_bytes += disk.total_space();
+    }
+
+    let disk_percent = if total_disk_bytes > 0 {
+        (available_disk_bytes as f32 / total_disk_bytes as f32) * 100.0
+    } else {
+        0.0
+    };
+
+    Ok((
+      sys.global_cpu_usage(),
+      cpu_brand,
+      ram_percent,
+      sys.total_memory(),
+      disk_percent,
+      available_disk_bytes,
+      System::boot_time()
+    ))
+}
+
 /// The Rust module definition exported to Python.
 #[pymodule]
 fn _rust_monitor(_py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<MonitorHandle>()?;
     module.add_function(wrap_pyfunction!(get_process_metrics, module)?)?;
+    module.add_function(wrap_pyfunction!(get_global_metrics, module)?)?;
     Ok(())
 }
 
