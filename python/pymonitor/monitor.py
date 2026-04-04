@@ -10,7 +10,7 @@ class PyMonitor:
     and pushing data directly to a database.
     """
 
-    def __init__(self, database_url: str, interval: int = 5):
+    def __init__(self, database_url: str | None = None, interval: int = 5):
         """Initialize PyMonitor instance.
 
         Args:

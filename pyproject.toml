@@ -41,11 +41,17 @@ test = [
 [tool.ruff.lint]
 select = ["E", "F", "S", "D", "I", "RUF"]
 
+[tool.ruff]
+line-length = 120
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
-[tool.ruff]
-line-length = 120
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**/*.py" = [
+    "S101",
+    "D100",
+]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
