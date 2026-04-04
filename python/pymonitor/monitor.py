@@ -1,5 +1,5 @@
 """A lightweight monitor for computer constants."""
-from src import _rust_monitor
+from . import _rust_monitor
 
 
 class PyMonitor:
