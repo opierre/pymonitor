@@ -30,13 +30,14 @@ class PyMonitor:
         """
         if self._monitor_handle is not None:
             raise RuntimeError("Monitor is already running.")
-        # TODO: start monitoring thread
+        # Start monitoring thread
+        self._monitor_handle = _rust_monitor.start_monitoring("", self._interval)
 
     def stop(self) -> None:
         """Stops the background Rust monitoring thread."""
         if self._monitor_handle is not None:
-            # TODO: stop the thread
-            pass
+            self._monitor_handle.stop()
+            self._monitor_handle = None
 
     @staticmethod
     def get_process_metrics(name: str) -> list[tuple[int, float, float]]:
