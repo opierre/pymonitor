@@ -1,9 +1,9 @@
+
 from datetime import datetime
 
 import pytest
-from typer.testing import CliRunner
-
 from pymonitor.cli import app
+from typer.testing import CliRunner
 
 runner = CliRunner()
 
@@ -41,21 +41,20 @@ def test_global_metrics_command(mock_monitor):
         15.5,
         "Fake CPU",
         45.2,
-        32 * 1024 ** 3,
+        32 * 1024**3,
         50.0,
-        12 * 1024 ** 3,
+        12 * 1024**3,
         1600000000,
     )
     result = runner.invoke(app, ["global-metrics"])
     assert result.exit_code == 0
-    assert "Global System Metrics" in result.stdout
+    assert "System Information" in result.stdout
+    assert "Instant Metrics" in result.stdout
     assert "15.50%" in result.stdout
     assert "Fake CPU" in result.stdout
     assert "45.20%" in result.stdout
     assert "32.00 GB" in result.stdout
     assert "12.00 GB" in result.stdout
     assert "50.00%" in result.stdout
-    expected_time = datetime.fromtimestamp(1600000000).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    expected_time = datetime.fromtimestamp(1600000000).strftime("%Y-%m-%d %H:%M:%S")
     assert expected_time in result.stdout
