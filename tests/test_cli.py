@@ -57,11 +57,17 @@ def test_global_metrics_command(mock_monitor):
     mock_metrics.swap_used = 5000
     mock_metrics.network_rx_bytes = 1024**2
     mock_metrics.network_tx_bytes = 1024**2
-    mock_metrics.network_interfaces = [("eth0", 1024**2, 1024**2), ("wlan0", 0, 0)]
+    mock_metrics.network_interfaces = [("eth0", 1024**2, 1024**2, ["192.168.1.10"]), ("wlan0", 0, 0, [])]
     mock_metrics.per_core_usage = [10.0, 20.0, 30.0]
     mock_metrics.load_avg_1m = 1.0
     mock_metrics.load_avg_5m = 2.0
     mock_metrics.load_avg_15m = 3.0
+    mock_metrics.users = [
+        ("admin", ["Users", "Administrators"]),
+        ("user1", ["Users"]),
+        ("WDAGUtilityAccount", []),  # system account — should be filtered out
+    ]
+    mock_metrics.top_processes = [("python", 1234, 10.5), ("rust", 5678, 5.2)]
 
     mock_monitor.get_global_metrics.return_value = mock_metrics
     
@@ -69,8 +75,13 @@ def test_global_metrics_command(mock_monitor):
     assert result.exit_code == 0
     assert "System Information" in result.stdout
     assert "System Instant Metrics" in result.stdout
+    assert "Top CPU Consumers" in result.stdout
     assert "Network Instant Metrics" in result.stdout
+    assert "System Users" in result.stdout
     assert "eth0" in result.stdout
+    assert "192.168.1.10" in result.stdout
+    assert "admin" in result.stdout
+    assert "python" in result.stdout
     assert "15.50%" in result.stdout
     assert "Fake CPU" in result.stdout
     assert "45.20%" in result.stdout

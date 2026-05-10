@@ -3,7 +3,7 @@
 import platform
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pymonitor.monitor import PyMonitor
 from rich.align import Align
@@ -85,8 +85,6 @@ def global_metrics():
     available_disk_gb = metrics.available_disk / (1024**3)
 
     # Format boot time
-    from datetime import timedelta
-
     boot_time_dt = datetime.fromtimestamp(metrics.boot_time).strftime("%Y-%m-%d %H:%M:%S")
     uptime = timedelta(seconds=int(time.time() - metrics.boot_time))
     boot_time_display = f"{boot_time_dt} ({uptime} uptime)"
@@ -121,14 +119,14 @@ def global_metrics():
     table.add_row("CPU Usage:", f"{metrics.cpu_usage:.2f}%")
     if metrics.cpu_temperature is not None:
         table.add_row("CPU Temp:", f"{metrics.cpu_temperature:.1f} °C")
-        
+
     per_core_strs = [f"{u:.0f}%" for u in metrics.per_core_usage]
     if per_core_strs:
         table.add_row("Per-Core Usage:", " ".join(per_core_strs))
 
     table.add_row("Load Avg:", f"{metrics.load_avg_1m:.2f}, {metrics.load_avg_5m:.2f}, {metrics.load_avg_15m:.2f}")
     table.add_row("RAM Usage:", f"{metrics.ram_percent:.2f}%")
-    
+
     if metrics.swap_total > 0:
         swap_pct = (metrics.swap_used / metrics.swap_total) * 100.0
         table.add_row("Swap Usage:", f"{swap_pct:.2f}%")
@@ -137,21 +135,62 @@ def global_metrics():
 
     console.print(Panel(Align.center(table), title="System Instant Metrics", expand=False, border_style="blue"))
 
+    # Top CPU Consumers
+    top_proc_table = Table(show_header=True, header_style="bold cyan", box=None)
+    top_proc_table.add_column("PID", style="cyan", justify="center")
+    top_proc_table.add_column("Process Name", style="yellow", justify="left")
+    top_proc_table.add_column("CPU Usage", style="green", justify="right")
+
+    for proc_name, pid, cpu_usage in metrics.top_processes:
+        top_proc_table.add_row(str(pid), proc_name, f"{cpu_usage:.2f}%")
+
+    console.print(Panel(Align.center(top_proc_table), title="Top CPU Consumers", expand=False, border_style="blue"))
+
     # Network Instant Metrics Table
     net_table = Table(show_header=True, header_style="bold cyan", box=None)
     net_table.add_column("Interface", style="cyan", justify="left")
+    net_table.add_column("IPv4", style="yellow", justify="left")
     net_table.add_column("Rx (MB/s)", style="green", justify="right")
-    net_table.add_column("Tx (MB/s)", style="yellow", justify="right")
+    net_table.add_column("Tx (MB/s)", style="green", justify="right")
 
-    for iface_name, rx_bytes, tx_bytes in metrics.network_interfaces:
+    for iface_name, rx_bytes, tx_bytes, ips in metrics.network_interfaces:
         rx_mbps = (rx_bytes / (1024**2)) * 5
         tx_mbps = (tx_bytes / (1024**2)) * 5
-        net_table.add_row(iface_name, f"{rx_mbps:.2f}", f"{tx_mbps:.2f}")
+        # Filter to IPv4 only (simple check: no colons means it's not IPv6)
+        ipv4_list = [ip for ip in ips if ":" not in ip]
+        ip_str = ", ".join(ipv4_list) if ipv4_list else "-"
+        net_table.add_row(iface_name, ip_str, f"{rx_mbps:.2f}", f"{tx_mbps:.2f}")
 
     if not metrics.network_interfaces:
-        net_table.add_row("No interfaces found", "-", "-")
+        net_table.add_row("No interfaces found", "-", "-", "-")
 
     console.print(Panel(Align.center(net_table), title="Network Instant Metrics", expand=False, border_style="blue"))
+
+    # System Users Table — filter to real person accounts only
+    # Real accounts are members of the "Users" group (or local equivalents).
+    # Admin rights are detected by membership in "Administrators" (or localized equivalents).
+    ADMIN_GROUPS = {"administrators", "administrateurs", "admins", "sudo", "wheel"}
+    USER_GROUPS  = {"users", "utilisateurs"}
+
+    real_users = []
+    for username, groups in metrics.users:
+        groups_lower = {g.lower() for g in groups}
+        if groups_lower & USER_GROUPS:
+            is_admin = bool(groups_lower & ADMIN_GROUPS)
+            real_users.append((username, is_admin))
+
+    user_table = Table(show_header=True, header_style="bold cyan", box=None)
+    user_table.add_column("User", style="yellow", justify="left")
+    user_table.add_column("Admin", style="green", justify="center")
+
+    for username, is_admin in real_users:
+        admin_label = "[bold red]Yes[/bold red]" if is_admin else "No"
+        user_table.add_row(username, admin_label)
+
+    if not real_users:
+        user_table.add_row("No user accounts found", "-")
+
+    console.print(Panel(Align.center(user_table), title="System Users", expand=False, border_style="blue"))
 
 
 if __name__ == "__main__":

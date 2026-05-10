@@ -65,11 +65,13 @@ pub struct GlobalMetricsSnapshot {
     pub swap_used: u64,
     pub network_rx_bytes: u64,
     pub network_tx_bytes: u64,
-    pub network_interfaces: Vec<(String, u64, u64)>,
+    pub network_interfaces: Vec<(String, u64, u64, Vec<String>)>,
     pub per_core_usage: Vec<f32>,
     pub load_avg_1m: f64,
     pub load_avg_5m: f64,
     pub load_avg_15m: f64,
+    pub users: Vec<(String, Vec<String>)>,
+    pub top_processes: Vec<(String, u32, f32)>,
 }
 
 /// Grab a single snapshot of the current global CPU, RAM usage percentage, available disk space in bytes, and boot time.
@@ -80,6 +82,7 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
         sysinfo::RefreshKind::nothing()
         .with_cpu(sysinfo::CpuRefreshKind::nothing().with_cpu_usage())
         .with_memory(sysinfo::MemoryRefreshKind::nothing().with_ram().with_swap())
+        .with_processes(sysinfo::ProcessRefreshKind::nothing().with_cpu())
     );
     let mut networks = sysinfo::Networks::new_with_refreshed_list();
     let components = sysinfo::Components::new_with_refreshed_list();
@@ -89,6 +92,7 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
     // Sleep is mandatory to establish a time delta for process CPU % calculations.
     std::thread::sleep(std::time::Duration::from_millis(200));
     sys.refresh_cpu_usage();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
     networks.refresh(true);
 
     let ram_percent = (sys.used_memory() as f32 / sys.total_memory() as f32) * 100.0;
@@ -135,12 +139,35 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
     for (interface_name, data) in &networks {
         network_rx_bytes += data.received();
         network_tx_bytes += data.transmitted();
-        network_interfaces.push((interface_name.to_string(), data.received(), data.transmitted()));
+        
+        let mut ips = Vec::new();
+        for ip_net in data.ip_networks() {
+            ips.push(format!("{}", ip_net.addr));
+        }
+        
+        network_interfaces.push((interface_name.to_string(), data.received(), data.transmitted(), ips));
     }
 
     let per_core_usage: Vec<f32> = sys.cpus().iter().map(|c| c.cpu_usage()).collect();
 
     let load_avg = System::load_average();
+
+    // Users — include group names so Python can filter system accounts and detect admin rights
+    let sys_users = sysinfo::Users::new_with_refreshed_list();
+    let mut users = Vec::new();
+    for user in sys_users.list() {
+        let group_names: Vec<String> = user.groups().iter().map(|g| g.name().to_string()).collect();
+        users.push((user.name().to_string(), group_names));
+    }
+
+    // Top processes
+    let mut processes_vec: Vec<_> = sys.processes().values().collect();
+    processes_vec.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap_or(std::cmp::Ordering::Equal));
+    
+    let mut top_processes = Vec::new();
+    for process in processes_vec.iter().take(5) {
+        top_processes.push((process.name().to_string_lossy().into_owned(), process.pid().as_u32(), process.cpu_usage()));
+    }
 
     Ok(GlobalMetricsSnapshot {
         cpu_usage: sys.global_cpu_usage(),
@@ -166,6 +193,8 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
         load_avg_1m: load_avg.one,
         load_avg_5m: load_avg.five,
         load_avg_15m: load_avg.fifteen,
+        users,
+        top_processes,
     })
 }
 
