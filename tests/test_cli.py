@@ -57,6 +57,7 @@ def test_global_metrics_command(mock_monitor):
     mock_metrics.swap_used = 5000
     mock_metrics.network_rx_bytes = 1024**2
     mock_metrics.network_tx_bytes = 1024**2
+    mock_metrics.network_interfaces = [("eth0", 1024**2, 1024**2), ("wlan0", 0, 0)]
     mock_metrics.per_core_usage = [10.0, 20.0, 30.0]
     mock_metrics.load_avg_1m = 1.0
     mock_metrics.load_avg_5m = 2.0
@@ -67,7 +68,9 @@ def test_global_metrics_command(mock_monitor):
     result = runner.invoke(app, ["global-metrics"])
     assert result.exit_code == 0
     assert "System Information" in result.stdout
-    assert "Instant Metrics" in result.stdout
+    assert "System Instant Metrics" in result.stdout
+    assert "Network Instant Metrics" in result.stdout
+    assert "eth0" in result.stdout
     assert "15.50%" in result.stdout
     assert "Fake CPU" in result.stdout
     assert "45.20%" in result.stdout

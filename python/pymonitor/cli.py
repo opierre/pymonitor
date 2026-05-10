@@ -135,12 +135,23 @@ def global_metrics():
     else:
         table.add_row("Swap Usage:", "0.00% (No Swap)")
 
-    rx_mb = metrics.network_rx_bytes / (1024**2)
-    tx_mb = metrics.network_tx_bytes / (1024**2)
-    # Scale to bytes/sec roughly since sleep is 200ms
-    table.add_row("Network I/O:", f"Rx: {rx_mb * 5:.2f} MB/s | Tx: {tx_mb * 5:.2f} MB/s")
+    console.print(Panel(Align.center(table), title="System Instant Metrics", expand=False, border_style="blue"))
 
-    console.print(Panel(Align.center(table), title="Instant Metrics", expand=False, border_style="blue"))
+    # Network Instant Metrics Table
+    net_table = Table(show_header=True, header_style="bold cyan", box=None)
+    net_table.add_column("Interface", style="cyan", justify="left")
+    net_table.add_column("Rx (MB/s)", style="green", justify="right")
+    net_table.add_column("Tx (MB/s)", style="yellow", justify="right")
+
+    for iface_name, rx_bytes, tx_bytes in metrics.network_interfaces:
+        rx_mbps = (rx_bytes / (1024**2)) * 5
+        tx_mbps = (tx_bytes / (1024**2)) * 5
+        net_table.add_row(iface_name, f"{rx_mbps:.2f}", f"{tx_mbps:.2f}")
+
+    if not metrics.network_interfaces:
+        net_table.add_row("No interfaces found", "-", "-")
+
+    console.print(Panel(Align.center(net_table), title="Network Instant Metrics", expand=False, border_style="blue"))
 
 
 if __name__ == "__main__":

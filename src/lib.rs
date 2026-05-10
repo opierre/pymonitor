@@ -65,6 +65,7 @@ pub struct GlobalMetricsSnapshot {
     pub swap_used: u64,
     pub network_rx_bytes: u64,
     pub network_tx_bytes: u64,
+    pub network_interfaces: Vec<(String, u64, u64)>,
     pub per_core_usage: Vec<f32>,
     pub load_avg_1m: f64,
     pub load_avg_5m: f64,
@@ -129,9 +130,12 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
 
     let mut network_rx_bytes = 0;
     let mut network_tx_bytes = 0;
-    for (_, data) in &networks {
+    let mut network_interfaces = Vec::new();
+    
+    for (interface_name, data) in &networks {
         network_rx_bytes += data.received();
         network_tx_bytes += data.transmitted();
+        network_interfaces.push((interface_name.to_string(), data.received(), data.transmitted()));
     }
 
     let per_core_usage: Vec<f32> = sys.cpus().iter().map(|c| c.cpu_usage()).collect();
@@ -157,6 +161,7 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
         swap_used,
         network_rx_bytes,
         network_tx_bytes,
+        network_interfaces,
         per_core_usage,
         load_avg_1m: load_avg.one,
         load_avg_5m: load_avg.five,
