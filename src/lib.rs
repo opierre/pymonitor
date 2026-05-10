@@ -1,7 +1,5 @@
 use pyo3::prelude::*;
 use sysinfo::{ProcessesToUpdate, System};
-use std::thread;
-use std::time::Duration;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use pyo3_stub_gen::{define_stub_info_gatherer, derive::{gen_stub_pyclass, gen_stub_pyfunction}};
 
@@ -165,7 +163,7 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
     processes_vec.sort_by(|a, b| b.cpu_usage().partial_cmp(&a.cpu_usage()).unwrap_or(std::cmp::Ordering::Equal));
     
     let mut top_processes = Vec::new();
-    for process in processes_vec.iter().take(5) {
+    for process in processes_vec.iter().take(4) {
         top_processes.push((process.name().to_string_lossy().into_owned(), process.pid().as_u32(), process.cpu_usage()));
     }
 
