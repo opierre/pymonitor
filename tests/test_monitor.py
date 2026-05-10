@@ -14,17 +14,16 @@ def test_get_process_metrics() -> None:
 def test_global_metrics() -> None:
     """Test that the Rust backend successfully returns global metrics."""
     monitor = PyMonitor()
-    cpu, brand, ram, max_ram, disk_pct, available_disk_bytes, boot = (
-        monitor.get_global_metrics()
-    )
-    assert isinstance(cpu, float)
-    assert isinstance(brand, str)
-    assert isinstance(ram, float)
-    assert isinstance(max_ram, int)
-    assert isinstance(disk_pct, float)
-    assert isinstance(available_disk_bytes, int)
-    assert isinstance(boot, int)
-    assert ram > 0
-    assert max_ram > 0
-    assert available_disk_bytes > 0
-    assert boot > 0
+    metrics = monitor.get_global_metrics()
+    
+    assert isinstance(metrics.cpu_usage, float)
+    assert isinstance(metrics.cpu_brand, str)
+    assert isinstance(metrics.ram_percent, float)
+    assert isinstance(metrics.max_ram, int)
+    assert isinstance(metrics.disk_percent, float)
+    assert isinstance(metrics.available_disk, int)
+    assert isinstance(metrics.boot_time, int)
+    assert metrics.ram_percent > 0
+    assert metrics.max_ram > 0
+    assert metrics.available_disk > 0
+    assert metrics.boot_time > 0

@@ -1,5 +1,6 @@
 
 from datetime import datetime
+from unittest.mock import MagicMock
 
 import pytest
 from pymonitor.cli import app
@@ -37,15 +38,32 @@ def test_process_command_not_found(mock_monitor):
 
 def test_global_metrics_command(mock_monitor):
     """Test the global-metrics CLI command."""
-    mock_monitor.get_global_metrics.return_value = (
-        15.5,
-        "Fake CPU",
-        45.2,
-        32 * 1024**3,
-        50.0,
-        12 * 1024**3,
-        1600000000,
-    )
+    mock_metrics = MagicMock()
+    mock_metrics.cpu_usage = 15.5
+    mock_metrics.cpu_brand = "Fake CPU"
+    mock_metrics.ram_percent = 45.2
+    mock_metrics.max_ram = 32 * 1024**3
+    mock_metrics.disk_percent = 50.0
+    mock_metrics.available_disk = 12 * 1024**3
+    mock_metrics.boot_time = 1600000000
+    mock_metrics.os_name = "FakeOS"
+    mock_metrics.os_version = "1.0"
+    mock_metrics.kernel_version = "0.1"
+    mock_metrics.hostname = "fakepc"
+    mock_metrics.core_count_physical = 4
+    mock_metrics.core_count_logical = 8
+    mock_metrics.cpu_temperature = 55.5
+    mock_metrics.swap_total = 10000
+    mock_metrics.swap_used = 5000
+    mock_metrics.network_rx_bytes = 1024**2
+    mock_metrics.network_tx_bytes = 1024**2
+    mock_metrics.per_core_usage = [10.0, 20.0, 30.0]
+    mock_metrics.load_avg_1m = 1.0
+    mock_metrics.load_avg_5m = 2.0
+    mock_metrics.load_avg_15m = 3.0
+
+    mock_monitor.get_global_metrics.return_value = mock_metrics
+    
     result = runner.invoke(app, ["global-metrics"])
     assert result.exit_code == 0
     assert "System Information" in result.stdout
@@ -56,5 +74,7 @@ def test_global_metrics_command(mock_monitor):
     assert "32.00 GB" in result.stdout
     assert "12.00 GB" in result.stdout
     assert "50.00%" in result.stdout
+    assert "FakeOS" in result.stdout
+    assert "10% 20% 30%" in result.stdout
     expected_time = datetime.fromtimestamp(1600000000).strftime("%Y-%m-%d %H:%M:%S")
     assert expected_time in result.stdout

@@ -52,11 +52,10 @@ class PyMonitor:
         return _rust_monitor.get_process_metrics(name)
 
     @staticmethod
-    def get_global_metrics() -> tuple[float, str, float, int, float, int, int]:
+    def get_global_metrics() -> _rust_monitor.GlobalMetricsSnapshot:
         """Retrieves an immediate snapshot of the system's global resource usage.
 
         Returns:
-            A tuple of (cpu_usage_percentage, cpu_brand, ram_percent, max_ram, disk_percent, available_disk,
-            boot_time).
+            A GlobalMetricsSnapshot object containing detailed system metrics.
         """
         return _rust_monitor.get_global_metrics()

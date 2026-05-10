@@ -74,31 +74,35 @@ def get_gpu_name() -> str:
 def global_metrics():
     """Fetch and display global CPU, RAM, and boot time."""
     start_time = time.perf_counter()
-    cpu, cpu_brand, ram, max_ram, disk_pct, available_disk_bytes, boot_time = MONITOR.get_global_metrics()
+    metrics = MONITOR.get_global_metrics()
     elapsed = time.perf_counter() - start_time
 
     # Fetch GPU
     gpu_brand = get_gpu_name()
 
     # Format into GB
-    max_ram_gb = max_ram / (1024**3)
-    available_disk_gb = available_disk_bytes / (1024**3)
+    max_ram_gb = metrics.max_ram / (1024**3)
+    available_disk_gb = metrics.available_disk / (1024**3)
 
     # Format boot time
     from datetime import timedelta
 
-    boot_time_dt = datetime.fromtimestamp(boot_time).strftime("%Y-%m-%d %H:%M:%S")
-    uptime = timedelta(seconds=int(time.time() - boot_time))
+    boot_time_dt = datetime.fromtimestamp(metrics.boot_time).strftime("%Y-%m-%d %H:%M:%S")
+    uptime = timedelta(seconds=int(time.time() - metrics.boot_time))
     boot_time_display = f"{boot_time_dt} ({uptime} uptime)"
 
     sys_info_table = Table(show_header=False, box=None)
     sys_info_table.add_column("Property", style="cyan", justify="right")
     sys_info_table.add_column("Value", style="yellow", justify="left")
 
-    sys_info_table.add_row("CPU:", cpu_brand)
+    sys_info_table.add_row("OS:", f"{metrics.os_name} {metrics.os_version} (Kernel: {metrics.kernel_version})")
+    sys_info_table.add_row("Hostname:", metrics.hostname)
+    
+    physical_cores = metrics.core_count_physical if metrics.core_count_physical else "?"
+    sys_info_table.add_row("CPU:", f"{metrics.cpu_brand} ({physical_cores} Cores / {metrics.core_count_logical} Threads)")
     sys_info_table.add_row("GPU:", gpu_brand)
     sys_info_table.add_row("Total RAM:", f"{max_ram_gb:.2f} GB")
-    sys_info_table.add_row("Available Disk:", f"{available_disk_gb:.2f} GB ({disk_pct:.2f}%)")
+    sys_info_table.add_row("Available Disk:", f"{available_disk_gb:.2f} GB ({metrics.disk_percent:.2f}%)")
     sys_info_table.add_row("Boot Time:", boot_time_display)
 
     console.print(
@@ -114,8 +118,27 @@ def global_metrics():
     table.add_column("Metric", style="cyan", justify="right")
     table.add_column("Value", style="green", justify="left")
 
-    table.add_row("CPU Usage:", f"{cpu:.2f}%")
-    table.add_row("RAM Usage:", f"{ram:.2f}%")
+    table.add_row("CPU Usage:", f"{metrics.cpu_usage:.2f}%")
+    if metrics.cpu_temperature is not None:
+        table.add_row("CPU Temp:", f"{metrics.cpu_temperature:.1f} °C")
+        
+    per_core_strs = [f"{u:.0f}%" for u in metrics.per_core_usage]
+    if per_core_strs:
+        table.add_row("Per-Core Usage:", " ".join(per_core_strs))
+
+    table.add_row("Load Avg:", f"{metrics.load_avg_1m:.2f}, {metrics.load_avg_5m:.2f}, {metrics.load_avg_15m:.2f}")
+    table.add_row("RAM Usage:", f"{metrics.ram_percent:.2f}%")
+    
+    if metrics.swap_total > 0:
+        swap_pct = (metrics.swap_used / metrics.swap_total) * 100.0
+        table.add_row("Swap Usage:", f"{swap_pct:.2f}%")
+    else:
+        table.add_row("Swap Usage:", "0.00% (No Swap)")
+
+    rx_mb = metrics.network_rx_bytes / (1024**2)
+    tx_mb = metrics.network_tx_bytes / (1024**2)
+    # Scale to bytes/sec roughly since sleep is 200ms
+    table.add_row("Network I/O:", f"Rx: {rx_mb * 5:.2f} MB/s | Tx: {tx_mb * 5:.2f} MB/s")
 
     console.print(Panel(Align.center(table), title="Instant Metrics", expand=False, border_style="blue"))
 
