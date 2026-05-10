@@ -18,6 +18,30 @@ console = Console()
 MONITOR = PyMonitor()
 
 
+def _print_adjacent(left, right) -> None:
+    """Render two Rich renderables side-by-side if the terminal is wide enough.
+
+    Measures the natural (minimum) width of each renderable and compares the
+    sum to the current console width. If there is enough room the two items
+    are placed in a borderless grid table; otherwise they are stacked.
+    """
+    from rich.measure import Measurement
+
+    opts = console.options
+    left_w  = Measurement.get(console, opts, left).maximum
+    right_w = Measurement.get(console, opts, right).maximum
+    gap = 1  # one-space padding between columns
+    if left_w + right_w + gap <= console.width:
+        grid = Table.grid(expand=False, padding=(0, gap, 0, 0))
+        grid.add_column()
+        grid.add_column()
+        grid.add_row(left, right)
+        console.print(grid)
+    else:
+        console.print(left)
+        console.print(right)
+
+
 @app.command()
 def process(
     name: str = Option(..., "--name", "-n", help="Name of the process to monitor"),
@@ -41,7 +65,7 @@ def process(
     table.add_column("CPU Usage (%)", style="green", justify="right")
     table.add_column("RAM Usage (%)", style="yellow", justify="right")
 
-    for pid, cpu, mem in metrics:
+    for pid, cpu, mem in sorted(metrics, key=lambda x: x[1], reverse=True):
         table.add_row(str(pid), f"{cpu:.2f}%", f"{mem:.2f}%")
 
     console.print(table)
@@ -103,13 +127,37 @@ def global_metrics():
     sys_info_table.add_row("Available Disk:", f"{available_disk_gb:.2f} GB ({metrics.disk_percent:.2f}%)")
     sys_info_table.add_row("Boot Time:", boot_time_display)
 
-    console.print(
+    # Build System Users panel
+    ADMIN_GROUPS = {"administrators", "administrateurs", "admins", "sudo", "wheel"}
+    USER_GROUPS  = {"users", "utilisateurs"}
+    real_users = []
+    for username, groups in metrics.users:
+        groups_lower = {g.lower() for g in groups}
+        if groups_lower & USER_GROUPS:
+            is_admin = bool(groups_lower & ADMIN_GROUPS)
+            real_users.append((username, is_admin))
+
+    user_table = Table(show_header=True, header_style="bold cyan", box=None)
+    user_table.add_column("User", style="yellow", justify="left")
+    user_table.add_column("Admin", style="green", justify="center")
+    for username, is_admin in real_users:
+        user_table.add_row(username, "[bold red]Yes[/bold red]" if is_admin else "No")
+    if not real_users:
+        user_table.add_row("No user accounts found", "-")
+
+    _print_adjacent(
         Panel(
             Align.center(sys_info_table),
             title=f"System Information [dim]({elapsed:.3f}s)[/dim]",
             expand=False,
             border_style="blue",
-        )
+        ),
+        Panel(
+            Align.center(user_table),
+            title="System Users",
+            expand=False,
+            border_style="blue",
+        ),
     )
 
     table = Table(show_header=False, box=None)
@@ -133,7 +181,7 @@ def global_metrics():
     else:
         table.add_row("Swap Usage:", "0.00% (No Swap)")
 
-    console.print(Panel(Align.center(table), title="System Instant Metrics", expand=False, border_style="blue"))
+    instant_panel = Panel(Align.center(table), title="System Instant Metrics", expand=False, border_style="blue")
 
     # Top CPU Consumers
     top_proc_table = Table(show_header=True, header_style="bold cyan", box=None)
@@ -144,7 +192,9 @@ def global_metrics():
     for proc_name, pid, cpu_usage in metrics.top_processes:
         top_proc_table.add_row(str(pid), proc_name, f"{cpu_usage:.2f}%")
 
-    console.print(Panel(Align.center(top_proc_table), title="Top CPU Consumers", expand=False, border_style="blue"))
+    top_proc_panel = Panel(Align.center(top_proc_table), title="Top CPU Consumers", expand=False, border_style="blue")
+
+    _print_adjacent(instant_panel, top_proc_panel)
 
     # Network Instant Metrics Table
     net_table = Table(show_header=True, header_style="bold cyan", box=None)
@@ -165,32 +215,6 @@ def global_metrics():
         net_table.add_row("No interfaces found", "-", "-", "-")
 
     console.print(Panel(Align.center(net_table), title="Network Instant Metrics", expand=False, border_style="blue"))
-
-    # System Users Table — filter to real person accounts only
-    # Real accounts are members of the "Users" group (or local equivalents).
-    # Admin rights are detected by membership in "Administrators" (or localized equivalents).
-    ADMIN_GROUPS = {"administrators", "administrateurs", "admins", "sudo", "wheel"}
-    USER_GROUPS  = {"users", "utilisateurs"}
-
-    real_users = []
-    for username, groups in metrics.users:
-        groups_lower = {g.lower() for g in groups}
-        if groups_lower & USER_GROUPS:
-            is_admin = bool(groups_lower & ADMIN_GROUPS)
-            real_users.append((username, is_admin))
-
-    user_table = Table(show_header=True, header_style="bold cyan", box=None)
-    user_table.add_column("User", style="yellow", justify="left")
-    user_table.add_column("Admin", style="green", justify="center")
-
-    for username, is_admin in real_users:
-        admin_label = "[bold red]Yes[/bold red]" if is_admin else "No"
-        user_table.add_row(username, admin_label)
-
-    if not real_users:
-        user_table.add_row("No user accounts found", "-")
-
-    console.print(Panel(Align.center(user_table), title="System Users", expand=False, border_style="blue"))
 
 
 if __name__ == "__main__":
