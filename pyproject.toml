@@ -62,5 +62,5 @@ convention = "google"
 ]
 
 [tool.pytest.ini_options]
-addopts = "--cov=pymonitor --cov-report=term-missing"
+addopts = "--cov=pymonitor --cov-report term:skip-covered --cov-report html:htmlcov --cov-report xml:coverage.xml"
 testpaths = ["tests"]
