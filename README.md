@@ -1,4 +1,4 @@
-# 🖥️ PyMonitor
+# 🖥️🩺 PyMonitor
 
 > A highly optimized, cross-platform system resource monitor with a Rust core and a beautiful Python CLI.
 
