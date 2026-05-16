@@ -1,4 +1,52 @@
-from python.pymonitor.monitor import PyMonitor
+"""Integration tests for the PyMonitor Python wrapper and Rust backend."""
+
+import json
+import threading
+import time
+
+import paho.mqtt.client as mqtt_client
+import pytest
+from pymonitor.monitor import ExporterType, PyMonitor
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+MQTT_HOST = "localhost"
+MQTT_PORT = 1883
+MQTT_TOPIC = "pymonitor/metrics"
+
+# Fields expected in every published JSON payload
+REQUIRED_METRIC_KEYS = {
+    "cpu_usage",
+    "cpu_brand",
+    "ram_percent",
+    "max_ram",
+    "disk_percent",
+    "available_disk",
+    "boot_time",
+    "os_name",
+    "os_version",
+    "kernel_version",
+    "hostname",
+    "core_count_logical",
+    "swap_total",
+    "swap_used",
+    "network_rx_bytes",
+    "network_tx_bytes",
+    "network_interfaces",
+    "per_core_usage",
+    "load_avg_1m",
+    "load_avg_5m",
+    "load_avg_15m",
+    "users",
+    "top_processes",
+}
+
+
+# ---------------------------------------------------------------------------
+# Existing metric tests
+# ---------------------------------------------------------------------------
 
 
 def test_get_process_metrics() -> None:
