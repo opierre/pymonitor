@@ -63,7 +63,7 @@ def test_global_metrics() -> None:
     """Test that the Rust backend successfully returns global metrics."""
     monitor = PyMonitor()
     metrics = monitor.get_global_metrics()
-    
+
     assert isinstance(metrics.cpu_usage, float)
     assert isinstance(metrics.cpu_brand, str)
     assert isinstance(metrics.ram_percent, float)
@@ -75,3 +75,139 @@ def test_global_metrics() -> None:
     assert metrics.max_ram > 0
     assert metrics.available_disk > 0
     assert metrics.boot_time > 0
+
+
+# ---------------------------------------------------------------------------
+# Thread lifecycle tests
+# ---------------------------------------------------------------------------
+
+
+def test_start_raises_if_already_running() -> None:
+    """Starting a second time without stopping must raise RuntimeError."""
+    monitor = PyMonitor()
+    monitor.start(refresh_rate=60, exporter_type=ExporterType.MQTT, priority=5)
+    try:
+        with pytest.raises(RuntimeError, match="already running"):
+            monitor.start(refresh_rate=60, exporter_type=ExporterType.MQTT, priority=5)
+    finally:
+        monitor.stop()
+
+
+def test_stop_is_idempotent() -> None:
+    """Calling stop() multiple times must not raise."""
+    monitor = PyMonitor()
+    monitor.start(refresh_rate=60, exporter_type=ExporterType.MQTT, priority=5)
+    monitor.stop()
+    monitor.stop()  # second call must be silent
+
+
+def test_invalid_priority_raises() -> None:
+    """Priority outside [0, 5] must raise ValueError."""
+    monitor = PyMonitor()
+    with pytest.raises(ValueError, match="[Pp]riority"):
+        monitor.start(refresh_rate=1, exporter_type=ExporterType.MQTT, priority=99)
+
+
+# ---------------------------------------------------------------------------
+# ExporterType Enum tests
+# ---------------------------------------------------------------------------
+
+
+def test_exporter_type_values() -> None:
+    """ExporterType members must expose correct string values."""
+    assert ExporterType.MQTT.value == "mqtt"
+    assert ExporterType.VICTORIAMETRICS.value == "victoriametrics"
+
+
+def test_exporter_type_is_str() -> None:
+    """ExporterType inherits from str so it can be passed wherever a str is expected."""
+    assert isinstance(ExporterType.MQTT, str)
+    assert ExporterType.MQTT == "mqtt"
+
+
+# ---------------------------------------------------------------------------
+# MQTT subscriber integration test
+# ---------------------------------------------------------------------------
+
+
+class _MqttCollector:
+    """Subscribes to MQTT_TOPIC and collects raw payloads in a list."""
+
+    def __init__(self) -> None:
+        self.payloads: list[bytes] = []
+        self._ready = threading.Event()
+        self._client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+        self._client.on_connect = self._on_connect
+        self._client.on_message = self._on_message
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:  # noqa: ANN001
+        client.subscribe(MQTT_TOPIC)
+        self._ready.set()
+
+    def _on_message(self, client, userdata, msg) -> None:  # noqa: ANN001
+        self.payloads.append(msg.payload)
+
+    def start(self) -> None:
+        """Connect and start the network loop in a background thread."""
+        self._client.connect(MQTT_HOST, MQTT_PORT, keepalive=10)
+        self._client.loop_start()
+        assert self._ready.wait(timeout=5), "MQTT subscriber did not connect within 5 s"
+
+    def stop(self) -> None:
+        """Disconnect and stop the network loop."""
+        self._client.loop_stop()
+        self._client.disconnect()
+
+
+def test_mqtt_subscriber_receives_metrics() -> None:
+    """Start PyMonitor, subscribe to MQTT, and assert at least one valid JSON payload arrives.
+
+    The test uses the real Mosquitto broker running on localhost:1883.
+    The monitoring thread is configured with a 1-second refresh rate so the
+    payload arrives quickly.
+    """
+    collector = _MqttCollector()
+    collector.start()
+
+    monitor = PyMonitor()
+    monitor.start(refresh_rate=1, exporter_type=ExporterType.MQTT, priority=5)
+
+    try:
+        # Wait up to 10 seconds for at least one message
+        deadline = time.monotonic() + 10
+        while not collector.payloads and time.monotonic() < deadline:
+            time.sleep(0.2)
+
+        assert collector.payloads, "No MQTT message received within 10 seconds"
+
+        # Parse and validate the most recent payload
+        raw = collector.payloads[-1]
+        data = json.loads(raw)
+
+        # All required top-level keys must be present
+        missing = REQUIRED_METRIC_KEYS - data.keys()
+        assert not missing, f"Missing metric keys in payload: {missing}"
+
+        # Sanity-check a selection of values
+        assert isinstance(data["cpu_usage"], float | int)
+        assert 0.0 <= data["cpu_usage"] <= 100.0, "cpu_usage out of range"
+
+        assert isinstance(data["ram_percent"], float | int)
+        assert 0.0 <= data["ram_percent"] <= 100.0, "ram_percent out of range"
+
+        assert isinstance(data["max_ram"], int)
+        assert data["max_ram"] > 0, "max_ram must be positive"
+
+        assert isinstance(data["cpu_brand"], str)
+        assert data["cpu_brand"], "cpu_brand must not be empty"
+
+        assert isinstance(data["per_core_usage"], list)
+        assert all(0.0 <= u <= 100.0 for u in data["per_core_usage"]), "per_core_usage values out of range"
+
+        assert isinstance(data["top_processes"], list)
+
+        assert isinstance(data["network_interfaces"], list)
+
+    finally:
+        monitor.stop()
+        collector.stop()
