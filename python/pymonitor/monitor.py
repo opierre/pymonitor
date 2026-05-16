@@ -1,5 +1,15 @@
 """A lightweight monitor for computer constants."""
+from enum import Enum
+
 from . import _rust_monitor
+
+
+class ExporterType(str, Enum):
+    """Supported backend exporter types."""
+
+    MQTT = "mqtt"
+    VICTORIAMETRICS = "victoriametrics"
+
 
 
 class PyMonitor:
@@ -10,20 +20,18 @@ class PyMonitor:
     and pushing data directly to a database.
     """
 
-    def __init__(self, database_url: str | None = None, interval: int = 5):
-        """Initialize PyMonitor instance.
-
-        Args:
-            database_url: database HTTP endpoint URL.
-            interval: polling interval in seconds. Defaults to 5.
-        """
-        # Store instance attributes
-        self._db_url = database_url
-        self._interval = interval
+    def __init__(self):
+        """Initialize PyMonitor instance."""
         self._monitor_handle: _rust_monitor.MonitorHandle | None = None
 
     def start(self) -> None:
+    def start(self, refresh_rate: int = 5, exporter_type: ExporterType = ExporterType.MQTT, priority: int = 5) -> None:
         """Starts the background Rust monitoring thread.
+
+        Args:
+            refresh_rate: polling interval in seconds. Defaults to 5.
+            exporter_type: type of exporter to use. Defaults to ExporterType.MQTT.
+            priority: thread priority from 0 (highest) to 5 (lowest). Defaults to 5.
 
         Raises:
             RuntimeError: if the monitor is already actively running.
