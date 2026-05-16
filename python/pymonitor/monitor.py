@@ -1,5 +1,8 @@
 """A lightweight monitor for computer constants."""
+
+import json
 from enum import Enum
+from pathlib import Path
 
 from . import _rust_monitor
 
@@ -9,7 +12,6 @@ class ExporterType(str, Enum):
 
     MQTT = "mqtt"
     VICTORIAMETRICS = "victoriametrics"
-
 
 
 class PyMonitor:
@@ -24,7 +26,28 @@ class PyMonitor:
         """Initialize PyMonitor instance."""
         self._monitor_handle: _rust_monitor.MonitorHandle | None = None
 
-    def start(self) -> None:
+    def _get_endpoint(self, exporter_type: str) -> str:
+        """Retrieves the endpoint URL for the given exporter type from the config."""
+        config_dir = Path.home() / ".pymonitor"
+        config_file = config_dir / "config.json"
+
+        # Create default config if it doesn't exist
+        if not config_file.exists():
+            config_dir.mkdir(parents=True, exist_ok=True)
+            default_config = {
+                "endpoints": {"mqtt": "localhost:1883", "victoriametrics": "http://localhost:8428/api/v1/import"}
+            }
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(default_config, f, indent=4)
+            return default_config["endpoints"].get(exporter_type, "")
+
+        with open(config_file, "r", encoding="utf-8") as f:
+            try:
+                config = json.load(f)
+                return config.get("endpoints", {}).get(exporter_type, "")
+            except json.JSONDecodeError:
+                return ""
+
     def start(self, refresh_rate: int = 5, exporter_type: ExporterType = ExporterType.MQTT, priority: int = 5) -> None:
         """Starts the background Rust monitoring thread.
 
@@ -38,8 +61,16 @@ class PyMonitor:
         """
         if self._monitor_handle is not None:
             raise RuntimeError("Monitor is already running.")
+
+        endpoint = self._get_endpoint(exporter_type.value)
+        if not endpoint:
+            raise ValueError(f"No endpoint found for exporter type: {exporter_type.value}")
+
+        if not (0 <= priority <= 5):
+            raise ValueError("Priority must be between 0 and 5.")
+
         # Start monitoring thread
-        self._monitor_handle = _rust_monitor.start_monitoring("", self._interval)
+        self._monitor_handle = _rust_monitor.start_monitoring(exporter_type.value, endpoint, refresh_rate, priority)
 
     def stop(self) -> None:
         """Stops the background Rust monitoring thread."""
