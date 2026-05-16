@@ -13,6 +13,8 @@ PyMonitor pushes the performance-critical work (polling loops, hardware inspecti
 - 🌐 **Cross-platform** — Windows and Linux supported
 - 🔌 **Extensible** — adding a new Rust metric takes fewer than 10 lines
 - 🧪 **Tested** — pytest integration tests with full mock coverage
+- 📡 **Background Exporters** — Start a zero-overhead Rust background thread to continuously export metrics to MQTT or VictoriaMetrics
+- 🎛️ **Configurable Priorities** — Control the exporter thread priority dynamically (from 0 to 5) so it never impacts system performance
 
 ---
 
@@ -45,6 +47,25 @@ uv run pymonitor global-metrics
 
 # Monitor a specific process by name
 uv run pymonitor process --name brave.exe
+```
+
+### Background Exporter (Python API)
+
+You can run PyMonitor as a background thread in your own Python applications. It will automatically load your configuration from `~/.pymonitor/config.json`.
+
+```python
+from pymonitor.monitor import PyMonitor
+import time
+
+monitor = PyMonitor()
+
+# Start background monitoring thread (priority 0 to 5)
+monitor.start(refresh_rate=5, exporter_type="mqtt", priority=5)
+
+# Do your other work while metrics are exported automatically in Rust
+time.sleep(60)
+
+monitor.stop()
 ```
 
 ---
@@ -200,24 +221,31 @@ uv run pymonitor process -n chrome.exe
 ```
 pymonitor/
 ├── src/
-│   └── lib.rs                  # 🦀 Rust extension (sysinfo polling, PyO3 bindings)
+│   ├── lib.rs                      # 🦀 Rust extension — sysinfo polling, PyO3 bindings, background thread
+│   └── exporter/
+│       ├── mod.rs                  # 🦀 Exporter trait + factory (create_exporter)
+│       ├── mqtt.rs                 # 🦀 MQTT exporter (rumqttc, non-blocking channel)
+│       └── victoria_metrics.rs    # 🦀 VictoriaMetrics exporter (ureq, non-blocking channel)
 ├── python/
 │   └── pymonitor/
-│       ├── _rust_monitor.pyi   # Auto-generated type stubs (do not edit manually)
-│       ├── monitor.py          # Python wrapper class (PyMonitor)
-│       └── cli.py              # Typer CLI + Rich display logic
+│       ├── _rust_monitor.pyi       # Auto-generated type stubs (do not edit manually)
+│       ├── monitor.py              # Python wrapper — PyMonitor + ExporterType enum
+│       └── cli.py                  # Typer CLI + Rich display logic
 └── tests/
-    ├── test_cli.py             # Integration tests for all CLI commands
-    └── test_monitor.py         # Integration tests for the Rust backend
+    ├── test_cli.py                 # Integration tests for all CLI commands
+    └── test_monitor.py             # Integration tests: Rust backend + MQTT subscriber
 ```
 
-### Data flow
+### Data flow — background exporter
 
 ```
 sysinfo (Rust crate)
-    └─▶ GlobalMetricsSnapshot (PyO3 pyclass)
-            └─▶ PyMonitor.get_global_metrics() (Python wrapper)
-                    └─▶ global_metrics() CLI command (Rich panels)
+    └─▶ get_global_metrics_internal()          [monitoring thread — priority-adjusted]
+            └─▶ GlobalMetricsSnapshot (Serialize)
+                    └─▶ serde_json::to_string()
+                            └─▶ mpsc::Sender<String>   [non-blocking, exporter worker thread]
+                                    └─▶ MqttExporter / VictoriaMetricsExporter
+                                            └─▶ Broker / Database
 ```
 
 ### Backend legend
@@ -229,6 +257,85 @@ sysinfo (Rust crate)
 
 ---
 
+## 📡 Receiving Exported Data
+
+### MQTT
+
+PyMonitor publishes a **JSON object** (all fields of `GlobalMetricsSnapshot`) to a single topic every `refresh_rate` seconds.
+
+| Item | Value |
+|------|-------|
+| **Broker address** | `~/.pymonitor/config.json` → `endpoints.mqtt` (e.g. `localhost:1883`) |
+| **Topic** | `pymonitor/metrics` |
+| **QoS** | 0 (At Most Once) |
+| **Retain** | No |
+| **Payload format** | UTF-8 JSON |
+
+**Payload fields** (all in one JSON object on `pymonitor/metrics`):
+
+| JSON key | Type | Description |
+|----------|------|-------------|
+| `cpu_usage` | `float` | Global CPU usage % |
+| `cpu_brand` | `string` | CPU model name |
+| `ram_percent` | `float` | RAM used % |
+| `max_ram` | `int` | Total RAM in bytes |
+| `disk_percent` | `float` | Disk free % |
+| `available_disk` | `int` | Available disk in bytes |
+| `boot_time` | `int` | Unix timestamp of last boot |
+| `os_name` | `string` | OS name |
+| `os_version` | `string` | OS version string |
+| `kernel_version` | `string` | Kernel version |
+| `hostname` | `string` | Machine hostname |
+| `core_count_physical` | `int \| null` | Physical CPU core count |
+| `core_count_logical` | `int` | Logical CPU thread count |
+| `cpu_temperature` | `float \| null` | CPU temperature in °C (if available) |
+| `swap_total` | `int` | Total swap in bytes |
+| `swap_used` | `int` | Used swap in bytes |
+| `network_rx_bytes` | `int` | Total bytes received (all interfaces) |
+| `network_tx_bytes` | `int` | Total bytes transmitted (all interfaces) |
+| `network_interfaces` | `array` | Per-interface `[name, rx, tx, [ips]]` |
+| `per_core_usage` | `array[float]` | Per-logical-core usage % |
+| `load_avg_1m` | `float` | 1-minute load average |
+| `load_avg_5m` | `float` | 5-minute load average |
+| `load_avg_15m` | `float` | 15-minute load average |
+| `users` | `array` | `[username, [groups]]` pairs |
+| `top_processes` | `array` | Top 4 CPU consumers — `[name, pid, cpu%]` |
+
+**Example subscriber (Python):**
+
+```python
+import json
+import paho.mqtt.client as mqtt
+
+def on_message(client, userdata, msg):
+    data = json.loads(msg.payload)
+    print(f"CPU: {data['cpu_usage']:.1f}%  RAM: {data['ram_percent']:.1f}%")
+
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+client.on_message = on_message
+client.connect("localhost", 1883)
+client.subscribe("pymonitor/metrics")
+client.loop_forever()
+```
+
+---
+
+### VictoriaMetrics
+
+PyMonitor POSTs the same JSON snapshot to the VictoriaMetrics import endpoint.
+
+| Item | Value |
+|------|-------|
+| **Endpoint** | `~/.pymonitor/config.json` → `endpoints.victoriametrics` (e.g. `http://localhost:8428/api/v1/import`) |
+| **HTTP method** | `POST` |
+| **Content-Type** | `application/json` |
+| **Payload format** | JSON (same field list as the MQTT table above) |
+
+> [!NOTE]
+> Query stored metrics via MetricsQL or `/api/v1/query` using field names as metric names, e.g. `cpu_usage`, `ram_percent`.
+
+---
+
 ## 📦 Dependencies
 
 | Package | Role |
@@ -236,6 +343,10 @@ sysinfo (Rust crate)
 | `sysinfo` (Rust) | Cross-platform hardware & OS metrics |
 | `pyo3` | Rust ↔ Python FFI bridge |
 | `pyo3-stub-gen` | Auto-generates `.pyi` type stubs from Rust code |
+| `rumqttc` (Rust) | MQTT client for the background exporter |
+| `ureq` (Rust) | HTTP client for the VictoriaMetrics exporter |
+| `serde` / `serde_json` (Rust) | JSON serialization of `GlobalMetricsSnapshot` |
+| `thread-priority` (Rust) | Cross-platform OS thread priority management |
 | `typer` | CLI argument parsing |
 | `rich` | Terminal formatting & colour output |
 
