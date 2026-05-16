@@ -2,6 +2,9 @@ use pyo3::prelude::*;
 use sysinfo::{ProcessesToUpdate, System};
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use pyo3_stub_gen::{define_stub_info_gatherer, derive::{gen_stub_pyclass, gen_stub_pyfunction}};
+use serde::Serialize;
+
+mod exporter;
 
 /// Holds the shared state to allow Python to stop the Rust background thread.
 #[gen_stub_pyclass]
@@ -44,6 +47,7 @@ fn get_process_metrics(name: &str) -> PyResult<Vec<(u32, f32, f32)>> {
 
 #[gen_stub_pyclass]
 #[pyclass(get_all)]
+#[derive(Serialize)]
 pub struct GlobalMetricsSnapshot {
     pub cpu_usage: f32,
     pub cpu_brand: String,
@@ -72,19 +76,7 @@ pub struct GlobalMetricsSnapshot {
     pub top_processes: Vec<(String, u32, f32)>,
 }
 
-/// Grab a single snapshot of the current global CPU, RAM usage percentage, available disk space in bytes, and boot time.
-#[gen_stub_pyfunction]
-#[pyfunction]
-fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
-    let mut sys = System::new_with_specifics(
-        sysinfo::RefreshKind::nothing()
-        .with_cpu(sysinfo::CpuRefreshKind::nothing().with_cpu_usage())
-        .with_memory(sysinfo::MemoryRefreshKind::nothing().with_ram().with_swap())
-        .with_processes(sysinfo::ProcessRefreshKind::nothing().with_cpu())
-    );
-    let mut networks = sysinfo::Networks::new_with_refreshed_list();
-    let components = sysinfo::Components::new_with_refreshed_list();
-    
+fn get_global_metrics_internal(sys: &mut System, networks: &mut sysinfo::Networks, components: &mut sysinfo::Components, disks: &mut sysinfo::Disks) -> GlobalMetricsSnapshot {
     sys.refresh_cpu_usage();
 
     // Sleep is mandatory to establish a time delta for process CPU % calculations.
@@ -96,7 +88,7 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
     let ram_percent = (sys.used_memory() as f32 / sys.total_memory() as f32) * 100.0;
     let cpu_brand = sys.cpus().first().map(|cpu| cpu.brand().to_string()).unwrap_or_else(|| "Unknown".to_string());
 
-    let disks = sysinfo::Disks::new_with_refreshed_list();
+    disks.refresh(true);
     let mut available_disk_bytes = 0;
     let mut total_disk_bytes = 0;
     for disk in disks.list() {
@@ -119,7 +111,8 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
     let core_count_logical = sys.cpus().len();
 
     let mut cpu_temperature: Option<f32> = None;
-    for component in &components {
+    components.refresh(true);
+    for component in components.list() {
         let label = component.label().to_lowercase();
         if label.contains("cpu") || label.contains("core") || label.contains("tctl") {
             cpu_temperature = component.temperature();
@@ -134,7 +127,7 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
     let mut network_tx_bytes = 0;
     let mut network_interfaces = Vec::new();
     
-    for (interface_name, data) in &networks {
+    for (interface_name, data) in networks.iter() {
         network_rx_bytes += data.received();
         network_tx_bytes += data.transmitted();
         
@@ -167,7 +160,7 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
         top_processes.push((process.name().to_string_lossy().into_owned(), process.pid().as_u32(), process.cpu_usage()));
     }
 
-    Ok(GlobalMetricsSnapshot {
+    GlobalMetricsSnapshot {
         cpu_usage: sys.global_cpu_usage(),
         cpu_brand,
         ram_percent,
@@ -193,7 +186,75 @@ fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
         load_avg_15m: load_avg.fifteen,
         users,
         top_processes,
-    })
+    }
+}
+
+/// Grab a single snapshot of the current global CPU, RAM usage percentage, available disk space in bytes, and boot time.
+#[gen_stub_pyfunction]
+#[pyfunction]
+fn get_global_metrics() -> PyResult<GlobalMetricsSnapshot> {
+    let mut sys = System::new_with_specifics(
+        sysinfo::RefreshKind::nothing()
+        .with_cpu(sysinfo::CpuRefreshKind::nothing().with_cpu_usage())
+        .with_memory(sysinfo::MemoryRefreshKind::nothing().with_ram().with_swap())
+        .with_processes(sysinfo::ProcessRefreshKind::nothing().with_cpu())
+    );
+    let mut networks = sysinfo::Networks::new_with_refreshed_list();
+    let mut components = sysinfo::Components::new_with_refreshed_list();
+    let mut disks = sysinfo::Disks::new_with_refreshed_list();
+
+    Ok(get_global_metrics_internal(&mut sys, &mut networks, &mut components, &mut disks))
+}
+
+#[gen_stub_pyfunction]
+#[pyfunction]
+fn start_monitoring(exporter_type: String, endpoint: String, refresh_rate: u64, priority: u8) -> PyResult<MonitorHandle> {
+    let is_running = Arc::new(AtomicBool::new(true));
+    let is_running_clone = is_running.clone();
+
+    std::thread::spawn(move || {
+        use thread_priority::*;
+        // Map 0 (highest) to 5 (lowest) to thread priority
+        // OS priority: Windows has 7 levels, Linux has 40
+        // Use cross-platform thread_priority crate
+        let thread_prio = match priority {
+            0 => ThreadPriority::Max,
+            1 => ThreadPriority::Crossplatform(ThreadPriorityValue::try_from(75).unwrap_or(ThreadPriorityValue::default())),
+            2 => ThreadPriority::Crossplatform(ThreadPriorityValue::try_from(50).unwrap_or(ThreadPriorityValue::default())),
+            3 => ThreadPriority::Crossplatform(ThreadPriorityValue::try_from(25).unwrap_or(ThreadPriorityValue::default())),
+            4 => ThreadPriority::Crossplatform(ThreadPriorityValue::try_from(10).unwrap_or(ThreadPriorityValue::default())),
+            _ => ThreadPriority::Min,
+        };
+        let _ = set_current_thread_priority(thread_prio);
+
+        let mut sys = System::new_with_specifics(
+            sysinfo::RefreshKind::nothing()
+            .with_cpu(sysinfo::CpuRefreshKind::nothing().with_cpu_usage())
+            .with_memory(sysinfo::MemoryRefreshKind::nothing().with_ram().with_swap())
+            .with_processes(sysinfo::ProcessRefreshKind::nothing().with_cpu())
+        );
+        let mut networks = sysinfo::Networks::new_with_refreshed_list();
+        let mut components = sysinfo::Components::new_with_refreshed_list();
+        let mut disks = sysinfo::Disks::new_with_refreshed_list();
+
+        let mut exporter = match exporter::create_exporter(&exporter_type, &endpoint) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("Failed to create exporter: {}", e);
+                return;
+            }
+        };
+
+        while is_running_clone.load(Ordering::Relaxed) {
+            let metrics = get_global_metrics_internal(&mut sys, &mut networks, &mut components, &mut disks);
+            if let Err(e) = exporter.export(&metrics) {
+                eprintln!("Failed to export metrics: {}", e);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(refresh_rate));
+        }
+    });
+
+    Ok(MonitorHandle { is_running })
 }
 
 /// The Rust module definition exported to Python.
@@ -203,6 +264,7 @@ fn _rust_monitor(_py: Python, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<GlobalMetricsSnapshot>()?;
     module.add_function(wrap_pyfunction!(get_process_metrics, module)?)?;
     module.add_function(wrap_pyfunction!(get_global_metrics, module)?)?;
+    module.add_function(wrap_pyfunction!(start_monitoring, module)?)?;
     Ok(())
 }
 
